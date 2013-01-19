@@ -20,7 +20,7 @@
 #include "freearray.h"
 
 static const char *usage =
-"usage: cusexmp [options]\n"
+"usage: proxyoss [options]\n"
 "\n"
 "options:\n"
 "    --help|-h             print this help message\n"
@@ -30,7 +30,7 @@ static const char *usage =
 "    --target=NAME|-t NAME target device name (defaults to /dev/dsp)\n"
 "\n";
 
-struct cusexmp_param {
+struct params {
 	unsigned		major;
 	unsigned		minor;
 	char			*dev_name;
@@ -38,17 +38,17 @@ struct cusexmp_param {
 	int			is_help;
 };
 
-#define CUSEXMP_OPT(t, p) { t, offsetof(struct cusexmp_param, p), 1 }
+#define MKOPT(t, p) { t, offsetof(struct params, p), 1 }
 
-static const struct fuse_opt cusexmp_opts[] = {
-	CUSEXMP_OPT("-M %u",		major),
-	CUSEXMP_OPT("--maj=%u",		major),
-	CUSEXMP_OPT("-m %u",		minor),
-	CUSEXMP_OPT("--min=%u",		minor),
-	CUSEXMP_OPT("-n %s",		dev_name),
-	CUSEXMP_OPT("--name=%s",	dev_name),
-	CUSEXMP_OPT("-t %s",		target_name),
-	CUSEXMP_OPT("--target=%s",	target_name),
+static const struct fuse_opt opts[] = {
+	MKOPT("-M %u",		major),
+	MKOPT("--maj=%u",		major),
+	MKOPT("-m %u",		minor),
+	MKOPT("--min=%u",		minor),
+	MKOPT("-n %s",		dev_name),
+	MKOPT("--name=%s",	dev_name),
+	MKOPT("-t %s",		target_name),
+	MKOPT("--target=%s",	target_name),
 	FUSE_OPT_KEY("-h",		0),
 	FUSE_OPT_KEY("--help",		0),
 	FUSE_OPT_END
@@ -235,10 +235,10 @@ static const struct cuse_lowlevel_ops cuseops = {
 	.ioctl		= my_ioctl,
 };
 
-static int cusexmp_process_arg(void *data, const char *arg, int key,
+static int process_arg(void *data, const char *arg, int key,
 			       struct fuse_args *outargs)
 {
-	struct cusexmp_param *param = data;
+	struct params *param = data;
 
 	(void)outargs;
 	(void)arg;
@@ -286,12 +286,12 @@ void cont(int sig) {
 
 int main(int argc, char **argv) {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-	struct cusexmp_param param = { 0, 0, NULL, "/dev/dsp", 0 };
+	struct params param = { 0, 0, NULL, "/dev/dsp", 0 };
 	char dev_name[128] = "DEVNAME=";
 	const char *dev_info_argv[] = { dev_name };
 	struct cuse_info ci;
 
-	if (fuse_opt_parse(&args, &param, cusexmp_opts, cusexmp_process_arg)) {
+	if (fuse_opt_parse(&args, &param, opts, process_arg)) {
 		printf("failed to parse option\n");
 		return 1;
 	}
