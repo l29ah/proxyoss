@@ -70,7 +70,6 @@ pthread_rwlock_t fdarr_lock;
 bool stopped = false;
 
 static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
-	puts("lolopen");
 	int fd;
 	if (stopped) { 
 		fd = -1;
@@ -133,7 +132,6 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	int fd = fdi->fd;
-	printf("ioctl %x\n", cmd);
 
 	if (flags & FUSE_IOCTL_COMPAT) {
 		fuse_reply_err(req, ENOSYS);
@@ -143,7 +141,6 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 #define WANT(in_wanted, out_wanted) \
 	do { \
 		if (in_bufsz < in_wanted || out_bufsz < out_wanted) { \
-			puts("retry!"); \
 			struct iovec iiov = { arg, in_wanted }; \
 			struct iovec oiov = { arg, out_wanted }; \
 			fuse_reply_ioctl_retry(req, in_wanted ? &iiov : NULL, in_wanted ? 1 : 0, out_wanted ? &oiov : NULL, out_wanted ? 1 : 0); \
