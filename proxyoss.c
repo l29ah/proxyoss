@@ -125,10 +125,6 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 }
 
 static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz) {
-	if (stopped) { 
-		fuse_reply_ioctl(req, 0, NULL, 0);
-		return;
-	}
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	int fd = fdi->fd;
@@ -146,76 +142,75 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			fuse_reply_ioctl_retry(req, in_wanted ? &iiov : NULL, in_wanted ? 1 : 0, out_wanted ? &oiov : NULL, out_wanted ? 1 : 0); \
 			goto out; \
 		} \
-	} while(0)
+	} while (0)
+
+#define IOCTL(c, a) \
+	if (!stopped) { \
+		int rv = ioctl(fd, c, &a); \
+		fuse_reply_ioctl(req, rv, &a, sizeof(a)); \
+	} else { \
+		fuse_reply_ioctl(req, 0, NULL, 0); \
+	}
 
 	switch (cmd) {
 		case SNDCTL_DSP_SPEED:	// 2
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				int rv = ioctl(fd, SNDCTL_DSP_SPEED, &a);
+				IOCTL(SNDCTL_DSP_SPEED, a);
 				fdi->rate = a;
-				fuse_reply_ioctl(req, rv, &a, sizeof(int));
 			}
-			fuse_reply_ioctl(req, 0, NULL, 0);
 			break;
 		case SNDCTL_DSP_STEREO:	// 3
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				int rv = ioctl(fd, SNDCTL_DSP_STEREO, &a);
+				IOCTL(SNDCTL_DSP_STEREO, a);
 				fdi->channels = a ? 2 : 1;
-				fuse_reply_ioctl(req, rv, &a, sizeof(int));
 			}
 			break;
 		case SNDCTL_DSP_SETFMT:	// 5
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				int rv = ioctl(fd, SNDCTL_DSP_SETFMT, &a);
+				IOCTL(SNDCTL_DSP_SETFMT, a);
 				fdi->fmt = a;
-				fuse_reply_ioctl(req, rv, &a, sizeof(int));
 			}
 			break;
 		case SNDCTL_DSP_CHANNELS:	// 6
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				int rv = ioctl(fd, SNDCTL_DSP_CHANNELS, &a);
+				IOCTL(SNDCTL_DSP_CHANNELS, a);
 				fdi->channels = a;
-				fuse_reply_ioctl(req, rv, &a, sizeof(int));
 			}
 			break;
 		case SNDCTL_DSP_GETOSPACE:	// 12
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
-				int rv = ioctl(fd, SNDCTL_DSP_GETOSPACE, &a);
-				fuse_reply_ioctl(req, rv, &a, sizeof(audio_buf_info));
+				IOCTL(SNDCTL_DSP_GETOSPACE, a);
 			}
 			break;
 		case SNDCTL_DSP_GETISPACE:	// 13
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
-				int rv = ioctl(fd, SNDCTL_DSP_GETISPACE, &a);
-				fuse_reply_ioctl(req, rv, &a, sizeof(audio_buf_info));
+				IOCTL(SNDCTL_DSP_GETISPACE, a);
 			}
 			break;
 		case SNDCTL_DSP_GETIPTR:	// 17
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
-				int rv = ioctl(fd, SNDCTL_DSP_GETIPTR, &a);
-				fuse_reply_ioctl(req, rv, &a, sizeof(count_info));
+				IOCTL(SNDCTL_DSP_GETIPTR, a);
 			}
 			break;
 		case SNDCTL_DSP_GETOPTR:	// 18
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
-				int rv = ioctl(fd, SNDCTL_DSP_GETOPTR, &a);
-				fuse_reply_ioctl(req, rv, &a, sizeof(count_info));
+				IOCTL(SNDCTL_DSP_GETOPTR, a);
 			}
 			break;
 		default:
@@ -235,21 +230,19 @@ static const struct cuse_lowlevel_ops cuseops = {
 	.ioctl		= my_ioctl,
 };
 
-static int process_arg(void *data, const char *arg, int key,
-			       struct fuse_args *outargs)
-{
+static int process_arg(void *data, const char *arg, int key, struct fuse_args *outargs) {
 	struct params *param = data;
 
 	(void)outargs;
 	(void)arg;
 
 	switch (key) {
-	case 0:
-		param->is_help = 1;
-		fprintf(stderr, "%s", usage);
-		return fuse_opt_add_arg(outargs, "-ho");
-	default:
-		return 1;
+		case 0:
+			param->is_help = 1;
+			fprintf(stderr, "%s", usage);
+			return fuse_opt_add_arg(outargs, "-ho");
+		default:
+			return 1;
 	}
 }
 
