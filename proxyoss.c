@@ -64,6 +64,7 @@ typedef struct {
 	int rate;
 	int channels;
 	int fmt;
+	int fragment;
 } fd_t;
 
 FREEARRAY_TYPE(fdarr_t, fd_t);
@@ -96,6 +97,7 @@ static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	FREEARRAY_ALLOC(&fdarr, fdi);
 	fdi->fd = fd;
 	fdi->open_flags = fi->flags;
+	fdi->fragment = 0;
 	get_proc_name(fuse_req_ctx(req)->pid, (char *)&fdi->label, OSS_LABEL_SIZE);
 	ioctl(fd, SNDCTL_SETLABEL, &fdi->label);
 	pthread_rwlock_unlock(&fdarr_lock);
@@ -119,6 +121,8 @@ void reopen(fd_t *fdi) {
 	ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
 	ioctl(fd, SNDCTL_DSP_SETFMT, &fdi->fmt);
 	ioctl(fd, SNDCTL_SETLABEL, &fdi->label);
+	if (fdi->fragment)
+		ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &fdi->fragment);
 }
 
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
@@ -246,6 +250,21 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				int a = *(int *)in_buf;
 				IOCTL(SNDCTL_DSP_CHANNELS, a);
 				fdi->channels = a;
+			}
+			break;
+		CASE(SNDCTL_DSP_SETFRAGMENT):
+			{
+				WANT(sizeof(int), sizeof(int));
+				int a = *(int *)in_buf;
+				IOCTL(SNDCTL_DSP_SETFRAGMENT, a);
+				fdi->fragment = a;
+			}
+			break;
+		CASE(SNDCTL_DSP_GETFMTS):
+			{
+				WANT(0, sizeof(int));
+				int a;
+				IOCTL(SNDCTL_DSP_GETOSPACE, a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETOSPACE):	// 12
