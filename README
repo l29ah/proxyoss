@@ -6,4 +6,4 @@ Usage:
 	make your software use /dev/loldsp as the audio device
 	make your suspend/resume scripts send SIGUSR1/SIGUSR2 signal to proxyoss and wait a bit before shutting down/after getting up OSS
 
-This thing is essentially a kludge, lacks the most of ioctl's support and haven't got through any sensible testing (I've tested it only on mplayer2 output so far), so it may fail to work for you. Though the proccess of adding a new ioctl is simple.
+This thing is essentially a kludge, lacks the most of ioctl's support and haven't got through any sensible testing (I've tested it only on mplayer2 output and mumble so far), so it may fail to work for you. Though the proccess of adding a new ioctl is simple.

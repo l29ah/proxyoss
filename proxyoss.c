@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <limits.h>
+#include <time.h>
 
 #include <cuse_lowlevel.h>
 #include <fuse_opt.h>
@@ -123,22 +124,43 @@ void reopen(fd_t *fdi) {
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
 	(void)off;
 	char *buf = calloc(size, 1);
+	pthread_rwlock_rdlock(&fdarr_lock);
+	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (stopped) { 
+		int fmtdiv = 1;
+		switch (fdi->fmt) {
+			case AFMT_S16_LE:
+			case AFMT_S16_BE:
+			case AFMT_U16_LE:
+			case AFMT_U16_BE:
+				fmtdiv = 2;
+				break;
+			case AFMT_S24_PACKED:
+				fmtdiv = 3;
+				break;
+			case AFMT_S24_LE:
+			case AFMT_S24_BE:
+			case AFMT_S32_LE:
+			case AFMT_S32_BE:
+				fmtdiv = 4;
+				break;
+		}
+		struct timespec ts;
+		ts.tv_sec = 0;
+		ts.tv_nsec = 1000000000 / fdi->rate / fdi->channels / fmtdiv;
+		while (nanosleep(&ts, &ts) == -1);
 		fuse_reply_buf(req, buf, size);
-		// TODO may need to include some smart sleeping
 	} else {
-		pthread_rwlock_rdlock(&fdarr_lock);
-		fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 		if (fdi->fd == -1)
 			reopen(fdi);
 		int rv = read(fdi->fd, buf, size);
-		pthread_rwlock_unlock(&fdarr_lock);
 
 		if (rv == -1)
 			fuse_reply_err(req, errno);
 
 		fuse_reply_buf(req, buf, rv);
 	}
+	pthread_rwlock_unlock(&fdarr_lock);
 	free(buf);
 }
 
