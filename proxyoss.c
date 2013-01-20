@@ -26,8 +26,8 @@ static const char *usage =
 "    --help|-h             print this help message\n"
 "    --maj=MAJ|-M MAJ      device major number\n"
 "    --min=MIN|-m MIN      device minor number\n"
-"    --name=NAME|-n NAME   device name (mandatory)\n"
-"    --target=NAME|-t NAME target device name (defaults to /dev/dsp)\n"
+"    --name=NAME|-n NAME   device name (defaults to /dev/dsp)\n"
+"    --target=NAME|-t NAME target device name (defaults to /dev/dsp0)\n"
 "\n";
 
 struct params {
@@ -37,6 +37,7 @@ struct params {
 	char			*target_name;
 	int			is_help;
 };
+struct params params = { 0, 0, "dsp", "/dev/dsp0", 0 };
 
 #define MKOPT(t, p) { t, offsetof(struct params, p), 1 }
 
@@ -53,8 +54,6 @@ static const struct fuse_opt opts[] = {
 	FUSE_OPT_KEY("--help",		0),
 	FUSE_OPT_END
 };
-
-char *target_name;
 
 typedef struct {
 	int fd;
@@ -74,7 +73,7 @@ static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	if (stopped) { 
 		fd = -1;
 	} else {
-		fd = open(target_name, fi->flags);
+		fd = open(params.target_name, fi->flags);
 		if (fd == -1)
 			fuse_reply_err(req, errno);
 	}
@@ -153,8 +152,10 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 		fuse_reply_ioctl(req, 0, NULL, 0); \
 	}
 
+#define CASE(ioc) case (uint32_t)(ioc)
+
 	switch (cmd) {
-		case SNDCTL_DSP_SPEED:	// 2
+		CASE(SNDCTL_DSP_SPEED):	// 2
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
@@ -162,7 +163,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->rate = a;
 			}
 			break;
-		case SNDCTL_DSP_STEREO:	// 3
+		CASE(SNDCTL_DSP_STEREO):	// 3
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
@@ -170,7 +171,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->channels = a ? 2 : 1;
 			}
 			break;
-		case SNDCTL_DSP_SETFMT:	// 5
+		CASE(SNDCTL_DSP_SETFMT):	// 5
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
@@ -178,7 +179,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->fmt = a;
 			}
 			break;
-		case SNDCTL_DSP_CHANNELS:	// 6
+		CASE(SNDCTL_DSP_CHANNELS):	// 6
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
@@ -186,32 +187,47 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->channels = a;
 			}
 			break;
-		case SNDCTL_DSP_GETOSPACE:	// 12
+		CASE(SNDCTL_DSP_GETOSPACE):	// 12
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
 				IOCTL(SNDCTL_DSP_GETOSPACE, a);
 			}
 			break;
-		case SNDCTL_DSP_GETISPACE:	// 13
+		CASE(SNDCTL_DSP_GETISPACE):	// 13
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
 				IOCTL(SNDCTL_DSP_GETISPACE, a);
 			}
 			break;
-		case SNDCTL_DSP_GETIPTR:	// 17
+		CASE(SNDCTL_DSP_GETIPTR):	// 17
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
 				IOCTL(SNDCTL_DSP_GETIPTR, a);
 			}
 			break;
-		case SNDCTL_DSP_GETOPTR:	// 18
+		CASE(SNDCTL_DSP_GETOPTR):	// 18
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
 				IOCTL(SNDCTL_DSP_GETOPTR, a);
+			}
+			break;
+		CASE(SNDCTL_SYSINFO):
+			{
+				WANT(0, sizeof(oss_sysinfo));
+				oss_sysinfo a;
+				IOCTL(SNDCTL_SYSINFO, a);
+			}
+			break;
+		CASE(SNDCTL_AUDIOINFO):
+			{
+				// TODO replace device names to ours or mess with the filesystem so the original device files will get overlapped
+				WANT(sizeof(oss_audioinfo), sizeof(oss_audioinfo));
+				oss_audioinfo a;
+				IOCTL(SNDCTL_AUDIOINFO, a);
 			}
 			break;
 		default:
@@ -268,7 +284,7 @@ void cont(int sig) {
 	pthread_rwlock_wrlock(&fdarr_lock);
 	for (unsigned i = 0; i < FREEARRAY_LEN(&fdarr); i++) {
 		fd_t *fdi = &FREEARRAY_ARR(&fdarr)[i];
-		int fd = open(target_name, fdi->open_flags);
+		int fd = open(params.target_name, fdi->open_flags);
 		fdi->fd = fd;
 		ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
 		ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
@@ -280,30 +296,23 @@ void cont(int sig) {
 
 int main(int argc, char **argv) {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-	struct params param = { 0, 0, NULL, "/dev/dsp", 0 };
 	char dev_name[128] = "DEVNAME=";
 	const char *dev_info_argv[] = { dev_name };
 	struct cuse_info ci;
 
-	if (fuse_opt_parse(&args, &param, opts, process_arg)) {
+	if (fuse_opt_parse(&args, &params, opts, process_arg)) {
 		printf("failed to parse option\n");
 		return 1;
 	}
 
-	if (!param.is_help) {
-		if (!param.dev_name) {
-			fprintf(stderr, "Error: device name missing\n");
-			return 1;
-		}
-		strncat(dev_name, param.dev_name, sizeof(dev_name) - 9);
+	if (!params.is_help) {
+		strncat(dev_name, params.dev_name, sizeof(dev_name) - 9);
 	}
 
-	if (param.target_name)
-		target_name = param.target_name;
 
 	memset(&ci, 0, sizeof(ci));
-	ci.dev_major = param.major;
-	ci.dev_minor = param.minor;
+	ci.dev_major = params.major;
+	ci.dev_minor = params.minor;
 	ci.dev_info_argc = 1;
 	ci.dev_info_argv = dev_info_argv;
 	ci.flags = CUSE_UNRESTRICTED_IOCTL;

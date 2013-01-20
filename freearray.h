@@ -20,7 +20,7 @@
 
 #define FREEARRAY_ARR(fa) ((fa)->arr)
 
-#define FREEARRAY_ID(fa, ptr) (((ptr) - (fa)->arr) / sizeof(typeof(*((fa)->arr))))
+#define FREEARRAY_ID(fa, ptr) ((ptr) - (fa)->arr)
 
 #define FREEARRAY_LEN(fa) ((fa)->arrlen)
 
