@@ -76,7 +76,7 @@ static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	} else {
 		fd = open(target_name, fi->flags);
 		if (fd == -1)
-			fuse_reply_err(req, -errno);
+			fuse_reply_err(req, errno);
 	}
 
 	fd_t *fdi;
