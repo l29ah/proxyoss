@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <signal.h>
 #include <pthread.h>
+#include <limits.h>
 
 #include <cuse_lowlevel.h>
 #include <fuse_opt.h>
@@ -58,6 +59,7 @@ static const struct fuse_opt opts[] = {
 typedef struct {
 	int fd;
 	int open_flags;
+	oss_label_t label;
 	int rate;
 	int channels;
 	int fmt;
@@ -67,6 +69,16 @@ FREEARRAY_TYPE(fdarr_t, fd_t);
 fdarr_t fdarr;
 pthread_rwlock_t fdarr_lock;
 bool stopped = false;
+
+static void get_proc_name(pid_t pid, char *dest, size_t len) {
+	char path[NAME_MAX + 16];
+	snprintf(path, NAME_MAX + 16, "/proc/%lld/cmdline", (long long)pid);
+	FILE *f = fopen(path, "r");
+	char tmpbuf[len];
+	fgets(tmpbuf, len, f);
+	strncpy(dest, tmpbuf, len);
+	fclose(f);
+}
 
 static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	int fd;
@@ -83,6 +95,8 @@ static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	FREEARRAY_ALLOC(&fdarr, fdi);
 	fdi->fd = fd;
 	fdi->open_flags = fi->flags;
+	get_proc_name(fuse_req_ctx(req)->pid, (char *)&fdi->label, OSS_LABEL_SIZE);
+	ioctl(fd, SNDCTL_SETLABEL, &fdi->label);
 	pthread_rwlock_unlock(&fdarr_lock);
 	fi->fh = FREEARRAY_ID(&fdarr, fdi);
 
@@ -103,6 +117,7 @@ void reopen(fd_t *fdi) {
 	ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
 	ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
 	ioctl(fd, SNDCTL_DSP_SETFMT, &fdi->fmt);
+	ioctl(fd, SNDCTL_SETLABEL, &fdi->label);
 }
 
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
@@ -252,6 +267,14 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				WANT(sizeof(oss_audioinfo), sizeof(oss_audioinfo));
 				oss_audioinfo a;
 				IOCTL(SNDCTL_AUDIOINFO, a);
+			}
+			break;
+		CASE(SNDCTL_SETLABEL):
+			{
+				WANT(sizeof(oss_label_t), 0);
+				oss_label_t *a = (oss_label_t *)in_buf;
+				IOCTL(SNDCTL_SETLABEL, a);
+				memcpy(&fdi->label, a, sizeof(oss_label_t));
 			}
 			break;
 		default:
