@@ -89,6 +89,22 @@ static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	fuse_reply_open(req, fi);
 }
 
+static void my_release(fuse_req_t req, struct fuse_file_info *fi) {
+	pthread_rwlock_wrlock(&fdarr_lock);
+	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
+	close(fdi->fd);
+	pthread_rwlock_unlock(&fdarr_lock);
+	fuse_reply_err(req, 0);
+}
+
+void reopen(fd_t *fdi) {
+	int fd = open(params.target_name, fdi->open_flags);
+	fdi->fd = fd;
+	ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
+	ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
+	ioctl(fd, SNDCTL_DSP_SETFMT, &fdi->fmt);
+}
+
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
 	(void)off;
 	char *buf = calloc(size, 1);
@@ -97,7 +113,10 @@ static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
 		// TODO may need to include some smart sleeping
 	} else {
 		pthread_rwlock_rdlock(&fdarr_lock);
-		int rv = read(FREEARRAY_ARR(&fdarr)[fi->fh].fd, buf, size);
+		fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
+		if (fdi->fd == -1)
+			reopen(fdi);
+		int rv = read(fdi->fd, buf, size);
 		pthread_rwlock_unlock(&fdarr_lock);
 
 		if (rv == -1)
@@ -115,7 +134,10 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 		return;
 	}
 	pthread_rwlock_rdlock(&fdarr_lock);
-	int rv = write(FREEARRAY_ARR(&fdarr)[fi->fh].fd, buf, size);
+	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
+	if (fdi->fd == -1)
+		reopen(fdi);
+	int rv = write(fdi->fd, buf, size);
 	pthread_rwlock_unlock(&fdarr_lock);
 
 	if (rv == -1)
@@ -125,14 +147,16 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 }
 
 static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz) {
-	pthread_rwlock_rdlock(&fdarr_lock);
-	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
-	int fd = fdi->fd;
-
 	if (flags & FUSE_IOCTL_COMPAT) {
 		fuse_reply_err(req, ENOSYS);
 		return;
 	}
+
+	pthread_rwlock_rdlock(&fdarr_lock);
+	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
+	if (fdi->fd == -1)
+		reopen(fdi);
+	int fd = fdi->fd;
 
 #define WANT(in_wanted, out_wanted) \
 	do { \
@@ -242,6 +266,7 @@ out:
 
 static const struct cuse_lowlevel_ops cuseops = {
 	.open		= my_open,
+	.release	= my_release,
 	.read		= my_read,
 	.write		= my_write,
 	.ioctl		= my_ioctl,
@@ -284,11 +309,7 @@ void cont(int sig) {
 	pthread_rwlock_wrlock(&fdarr_lock);
 	for (unsigned i = 0; i < FREEARRAY_LEN(&fdarr); i++) {
 		fd_t *fdi = &FREEARRAY_ARR(&fdarr)[i];
-		int fd = open(params.target_name, fdi->open_flags);
-		fdi->fd = fd;
-		ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
-		ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
-		ioctl(fd, SNDCTL_DSP_SETFMT, &fdi->fmt);
+		reopen(fdi);
 	}
 	stopped = false;
 	pthread_rwlock_unlock(&fdarr_lock);
