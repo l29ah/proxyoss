@@ -4,7 +4,7 @@
 	typedef struct { \
 		type *arr; \
 		size_t arrlen; \
-		void **freestack; \
+		type **freestack; \
 		size_t freestacklen; \
 		size_t allocatedlen; \
 	} name
@@ -13,7 +13,7 @@
 	do { \
 		(fa)->arr = malloc(FREEARRAY_MIN_LEN * sizeof(*((fa)->arr))); \
 		(fa)->arrlen = 0; \
-		(fa)->freestack = malloc(FREEARRAY_MIN_LEN * sizeof(void *)); \
+		(fa)->freestack = malloc(FREEARRAY_MIN_LEN * sizeof(typeof(*((fa)->arr)) *)); \
 		(fa)->freestacklen = 0; \
 		(fa)->allocatedlen = FREEARRAY_MIN_LEN; \
 	} while (0)
@@ -33,7 +33,7 @@
 			if ((fa)->arrlen == (fa)->allocatedlen) { \
 				(fa)->allocatedlen *= 2; \
 				(fa)->arr = realloc((fa)->arr, sizeof(typeof(*((fa)->arr))) * (fa)->allocatedlen); \
-				(fa)->arr = realloc((fa)->arr, sizeof(void *) * (fa)->allocatedlen); \
+				(fa)->freestack = realloc((fa)->freestack, sizeof(typeof(*((fa)->arr)) *) * (fa)->allocatedlen); \
 			} \
 			(ptr) = &((fa)->arr[(fa)->arrlen++]); \
 		} \

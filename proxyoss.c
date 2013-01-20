@@ -96,16 +96,17 @@ static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
 	if (stopped) { 
 		fuse_reply_buf(req, buf, size);
 		// TODO may need to include some smart sleeping
-		return;
+	} else {
+		pthread_rwlock_rdlock(&fdarr_lock);
+		int rv = read(FREEARRAY_ARR(&fdarr)[fi->fh].fd, buf, size);
+		pthread_rwlock_unlock(&fdarr_lock);
+
+		if (rv == -1)
+			fuse_reply_err(req, errno);
+
+		fuse_reply_buf(req, buf, rv);
 	}
-	pthread_rwlock_rdlock(&fdarr_lock);
-	int rv = read(FREEARRAY_ARR(&fdarr)[fi->fh].fd, buf, size);
-	pthread_rwlock_unlock(&fdarr_lock);
-
-	if (rv == -1)
-		fuse_reply_err(req, errno);
-
-	fuse_reply_buf(req, buf, rv);
+	free(buf);
 }
 
 static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, struct fuse_file_info *fi) {
