@@ -21,6 +21,12 @@
 
 #include "freearray.h"
 
+#ifdef NDEBUG
+#define logf(fmt, args...) ;
+#else
+#define logf(fmt, args...) fprintf(stderr, fmt, ##args)
+#endif
+
 static const char *usage =
 "usage: proxyoss [options]\n"
 "\n"
@@ -115,6 +121,7 @@ static void my_release(fuse_req_t req, struct fuse_file_info *fi) {
 }
 
 void reopen(fd_t *fdi) {
+	logf("reopening the audio device\n");
 	int fd = open(params.target_name, fdi->open_flags);
 	fdi->fd = fd;
 	ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
@@ -125,12 +132,21 @@ void reopen(fd_t *fdi) {
 		ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &fdi->fragment);
 }
 
+void update_flags(fd_t *fdi, struct fuse_file_info *fi) {
+	if (fi->flags != fdi->open_flags) {
+		if (!stopped)
+			fcntl(fdi->fd, F_SETFL, fi->flags);
+		fdi->open_flags = fi->flags;
+	}
+}
+
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
 	(void)off;
 	char *buf = calloc(size, 1);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (stopped) { 
+		update_flags(fdi, fi);
 		int fmtdiv = 1;
 		switch (fdi->fmt) {
 			case AFMT_S16_LE:
@@ -157,6 +173,7 @@ static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
 	} else {
 		if (fdi->fd == -1)
 			reopen(fdi);
+		update_flags(fdi, fi);
 		int rv = read(fdi->fd, buf, size);
 
 		if (rv == -1)
@@ -178,6 +195,7 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (fdi->fd == -1)
 		reopen(fdi);
+	update_flags(fdi, fi);
 	int rv = write(fdi->fd, buf, size);
 	pthread_rwlock_unlock(&fdarr_lock);
 
@@ -193,10 +211,12 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 		return;
 	}
 
+	logf("ioctl%x\n", cmd);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (fdi->fd == -1)
 		reopen(fdi);
+	update_flags(fdi, fi);
 	int fd = fdi->fd;
 
 #define WANT(in_wanted, out_wanted) \
@@ -224,7 +244,9 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
+				logf("rate: want %d\n", a);
 				IOCTL(SNDCTL_DSP_SPEED, a);
+				logf("rate: got %d\n", a);
 				fdi->rate = a;
 			}
 			break;
@@ -240,7 +262,9 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
+				logf("fmt: want %x\n", a);
 				IOCTL(SNDCTL_DSP_SETFMT, a);
+				logf("fmt: got %x\n", a);
 				fdi->fmt = a;
 			}
 			break;
@@ -248,7 +272,9 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
+				logf("chans: want %d\n", a);
 				IOCTL(SNDCTL_DSP_CHANNELS, a);
+				logf("chans: got %d\n", a);
 				fdi->channels = a;
 			}
 			break;
