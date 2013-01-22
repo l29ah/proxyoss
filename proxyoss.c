@@ -278,6 +278,13 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->channels = a;
 			}
 			break;
+		CASE(OSS_GETVERSION):
+			{
+				WANT(sizeof(int), sizeof(int));
+				int a;
+				IOCTL(OSS_GETVERSION, a);
+			}
+			break;
 		CASE(SNDCTL_DSP_SETFRAGMENT):
 			{
 				WANT(sizeof(int), sizeof(int));
@@ -290,7 +297,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(0, sizeof(int));
 				int a;
-				IOCTL(SNDCTL_DSP_GETOSPACE, a);
+				IOCTL(SNDCTL_DSP_GETFMTS, a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETOSPACE):	// 12
