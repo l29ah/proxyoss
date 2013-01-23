@@ -206,6 +206,7 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 }
 
 static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz) {
+	(void)flags;
 	logf("ioctl %x\n", cmd);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
@@ -224,17 +225,28 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 		} \
 	} while (0)
 
-#define IOCTL(c, a) \
+#define IOCTL_(c, addr, size) \
 	if (!stopped) { \
-		int rv = ioctl(fd, c, &a); \
-		fuse_reply_ioctl(req, rv, &a, sizeof(a)); \
+		int rv = ioctl(fd, c, addr); \
+		fuse_reply_ioctl(req, rv, addr, size); \
 	} else { \
 		fuse_reply_ioctl(req, 0, NULL, 0); \
 	}
+#define IOCTL(c, a) IOCTL_(c, &a, sizeof(a))
 
 #define CASE(ioc) case (uint32_t)(ioc)
 
 	switch (cmd) {
+		CASE(SNDCTL_DSP_HALT):
+			{
+				IOCTL_(SNDCTL_DSP_HALT, NULL, 0);
+			}
+			break;
+		CASE(SNDCTL_DSP_SYNC):
+			{
+				IOCTL_(SNDCTL_DSP_SYNC, NULL, 0);
+			}
+			break;
 		CASE(SNDCTL_DSP_SPEED):	// 2
 			{
 				WANT(sizeof(int), sizeof(int));
