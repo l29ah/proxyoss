@@ -206,12 +206,7 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 }
 
 static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz) {
-	if (flags & FUSE_IOCTL_COMPAT) {
-		fuse_reply_err(req, ENOSYS);
-		return;
-	}
-
-	logf("ioctl%x\n", cmd);
+	logf("ioctl %x\n", cmd);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (fdi->fd == -1)
@@ -258,6 +253,14 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				fdi->channels = a ? 2 : 1;
 			}
 			break;
+		CASE(SNDCTL_DSP_GETBLKSIZE):
+			{
+				// Somewhy it's WR, so we retrieve an int just to stay on the safe side
+				WANT(sizeof(int), sizeof(int));
+				int a = *(int *)in_buf;
+				IOCTL(SNDCTL_DSP_GETBLKSIZE, a);
+			}
+			break;
 		CASE(SNDCTL_DSP_SETFMT):	// 5
 			{
 				WANT(sizeof(int), sizeof(int));
@@ -280,7 +283,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			break;
 		CASE(OSS_GETVERSION):
 			{
-				WANT(sizeof(int), sizeof(int));
+				WANT(0, sizeof(int));
 				int a;
 				IOCTL(OSS_GETVERSION, a);
 			}
@@ -312,6 +315,13 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
 				IOCTL(SNDCTL_DSP_GETISPACE, a);
+			}
+			break;
+		CASE(SNDCTL_DSP_GETCAPS):
+			{
+				WANT(0, sizeof(int));
+				int a;
+				IOCTL(SNDCTL_DSP_GETCAPS, a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETIPTR):	// 17
