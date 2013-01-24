@@ -132,8 +132,16 @@ void reopen(fd_t *fdi) {
 		ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &fdi->fragment);
 }
 
+void reopen_if_needed(fd_t *fdi) {
+	pthread_rwlock_wrlock(&fdarr_lock);
+		if (fdi->fd == -1)
+			reopen(fdi);
+	pthread_rwlock_unlock(&fdarr_lock);
+}
+
 void update_flags(fd_t *fdi, struct fuse_file_info *fi) {
 	if (fi->flags != fdi->open_flags) {
+		logf("updating flags from %x to %x\n", fdi->open_flags, fi->flags);
 		if (!stopped)
 			fcntl(fdi->fd, F_SETFL, fi->flags);
 		fdi->open_flags = fi->flags;
@@ -143,9 +151,9 @@ void update_flags(fd_t *fdi, struct fuse_file_info *fi) {
 static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_info *fi) {
 	(void)off;
 	char *buf = calloc(size, 1);
-	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
 	if (stopped) { 
+		pthread_rwlock_rdlock(&fdarr_lock);
 		update_flags(fdi, fi);
 		int fmtdiv = 1;
 		switch (fdi->fmt) {
@@ -171,8 +179,8 @@ static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
 		while (nanosleep(&ts, &ts) == -1);
 		fuse_reply_buf(req, buf, size);
 	} else {
-		if (fdi->fd == -1)
-			reopen(fdi);
+		reopen_if_needed(fdi);
+		pthread_rwlock_rdlock(&fdarr_lock);
 		update_flags(fdi, fi);
 		int rv = read(fdi->fd, buf, size);
 
@@ -191,10 +199,9 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 		fuse_reply_write(req, size);
 		return;
 	}
-	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
-	if (fdi->fd == -1)
-		reopen(fdi);
+	reopen_if_needed(fdi);
+	pthread_rwlock_rdlock(&fdarr_lock);
 	update_flags(fdi, fi);
 	int rv = write(fdi->fd, buf, size);
 	pthread_rwlock_unlock(&fdarr_lock);
@@ -208,9 +215,17 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *fi, unsigned flags, const void *in_buf, size_t in_bufsz, size_t out_bufsz) {
 	(void)flags;
 	logf("ioctl %x\n", cmd);
-	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
-	int fd = fdi->fd;
+	int fd;
+	if (!stopped) {
+		reopen_if_needed(fdi);
+		pthread_rwlock_rdlock(&fdarr_lock);
+		fd = fdi->fd;
+		// The flags are zeroed out on ioctl call somewhy
+		//update_flags(fdi, fi);
+	} else {
+		pthread_rwlock_rdlock(&fdarr_lock);
+	}
 
 #define WANT(in_wanted, out_wanted) \
 	do { \
@@ -224,9 +239,6 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 
 #define IOCTL_(c, addr, size) \
 	if (!stopped) { \
-		if (fdi->fd == -1) \
-			reopen(fdi); \
-		update_flags(fdi, fi); \
 		int rv = ioctl(fd, c, addr); \
 		fuse_reply_ioctl(req, rv, addr, size); \
 	} else { \
