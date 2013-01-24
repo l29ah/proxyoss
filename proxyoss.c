@@ -210,9 +210,6 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 	logf("ioctl %x\n", cmd);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	fd_t *fdi = &FREEARRAY_ARR(&fdarr)[fi->fh];
-	if (fdi->fd == -1)
-		reopen(fdi);
-	update_flags(fdi, fi);
 	int fd = fdi->fd;
 
 #define WANT(in_wanted, out_wanted) \
@@ -227,6 +224,9 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 
 #define IOCTL_(c, addr, size) \
 	if (!stopped) { \
+		if (fdi->fd == -1) \
+			reopen(fdi); \
+		update_flags(fdi, fi); \
 		int rv = ioctl(fd, c, addr); \
 		fuse_reply_ioctl(req, rv, addr, size); \
 	} else { \
