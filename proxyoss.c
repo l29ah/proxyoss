@@ -176,20 +176,23 @@ static void my_read(fuse_req_t req, size_t size, off_t off, struct fuse_file_inf
 		struct timespec ts;
 		ts.tv_sec = 0;
 		ts.tv_nsec = 1000000000 / fdi->rate / fdi->channels / fmtdiv;
+		pthread_rwlock_unlock(&fdarr_lock);
 		while (nanosleep(&ts, &ts) == -1);
 		fuse_reply_buf(req, buf, size);
 	} else {
 		reopen_if_needed(fdi);
 		pthread_rwlock_rdlock(&fdarr_lock);
 		update_flags(fdi, fi);
-		int rv = read(fdi->fd, buf, size);
+		int nfd = dup(fdi->fd);
+		pthread_rwlock_unlock(&fdarr_lock);
+		int rv = read(nfd, buf, size);
+		close(nfd);
 
 		if (rv == -1)
 			fuse_reply_err(req, errno);
 
 		fuse_reply_buf(req, buf, rv);
 	}
-	pthread_rwlock_unlock(&fdarr_lock);
 	free(buf);
 }
 
@@ -203,8 +206,10 @@ static void my_write(fuse_req_t req, const char *buf, size_t size, off_t off, st
 	reopen_if_needed(fdi);
 	pthread_rwlock_rdlock(&fdarr_lock);
 	update_flags(fdi, fi);
-	int rv = write(fdi->fd, buf, size);
+	int nfd = dup(fdi->fd);
 	pthread_rwlock_unlock(&fdarr_lock);
+	int rv = write(nfd, buf, size);
+	close(nfd);
 
 	if (rv == -1)
 		fuse_reply_err(req, errno);
