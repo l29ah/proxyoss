@@ -2,8 +2,10 @@ This program allows you to stop applications from using OSS4 so it can be restar
 
 Usage:
 	$ make
-	$ ./proxyoss -d -n loldsp
-	make your software use /dev/loldsp as the audio device
+	# mv /dev/dsp{,0}
+	# mv /dev/mixer{,0}
+	$ ./proxyoss
+	make your udev set the proper perms
 	make your suspend/resume scripts send SIGUSR1/SIGUSR2 signal to proxyoss and wait a bit before shutting down/after getting up OSS
 
 This thing is essentially a kludge, lacks the most of ioctl's support and haven't got through any sensible testing, so it may fail to work for you. Though the proccess of adding a new ioctl is simple.
@@ -15,4 +17,5 @@ Works fine with:
 	Adobe Flash
 	mumble
 	sox
+	ossxmix
 and many more!

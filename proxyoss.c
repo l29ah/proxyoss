@@ -26,44 +26,31 @@
 #else
 #define logf(fmt, args...) fprintf(stderr, fmt, ##args)
 #endif
+#define errf(fmt, args...) fprintf(stderr, fmt, ##args)
 
 static const char *usage =
 "usage: proxyoss [options]\n"
 "\n"
 "options:\n"
 "    --help|-h             print this help message\n"
-"    --maj=MAJ|-M MAJ      device major number\n"
-"    --min=MIN|-m MIN      device minor number\n"
-"    --name=NAME|-n NAME   device name (defaults to /dev/dsp)\n"
-"    --target=NAME|-t NAME target device name (defaults to /dev/dsp0)\n"
+"    TODO configurability :)\n"
 "\n";
 
 struct params {
-	unsigned		major;
-	unsigned		minor;
-	char			*dev_name;
-	char			*target_name;
 	int			is_help;
 };
-struct params params = { 0, 0, "dsp", "/dev/dsp0", 0 };
+struct params params = { 0 };
 
 #define MKOPT(t, p) { t, offsetof(struct params, p), 1 }
 
 static const struct fuse_opt opts[] = {
-	MKOPT("-M %u",		major),
-	MKOPT("--maj=%u",		major),
-	MKOPT("-m %u",		minor),
-	MKOPT("--min=%u",		minor),
-	MKOPT("-n %s",		dev_name),
-	MKOPT("--name=%s",	dev_name),
-	MKOPT("-t %s",		target_name),
-	MKOPT("--target=%s",	target_name),
 	FUSE_OPT_KEY("-h",		0),
 	FUSE_OPT_KEY("--help",		0),
 	FUSE_OPT_END
 };
 
 typedef struct {
+	uint_fast8_t target;
 	int fd;
 	int open_flags;
 	oss_label_t label;
@@ -88,19 +75,36 @@ static void get_proc_name(pid_t pid, char *dest, size_t len) {
 	fclose(f);
 }
 
+int open_target(uint_fast8_t target, int flags) {
+	char *name;
+	switch (target) {
+		case 0:
+			name = "/dev/dsp0";
+			break;
+		case 1:
+			name = "/dev/mixer0";
+			break;
+	}
+	return open(name, flags);
+}
+
 static void my_open(fuse_req_t req, struct fuse_file_info *fi) {
 	int fd;
+	uint_fast8_t target = (intptr_t)fuse_req_userdata(req);
 	if (stopped) { 
 		fd = -1;
 	} else {
-		fd = open(params.target_name, fi->flags);
-		if (fd == -1)
+		fd = open_target(target, fi->flags);
+		if (fd == -1) {
 			fuse_reply_err(req, errno);
+			return;
+		}
 	}
 
 	fd_t *fdi;
 	pthread_rwlock_wrlock(&fdarr_lock);
 	FREEARRAY_ALLOC(&fdarr, fdi);
+	fdi->target = target;
 	fdi->fd = fd;
 	fdi->open_flags = fi->flags;
 	fdi->fragment = 0;
@@ -122,7 +126,7 @@ static void my_release(fuse_req_t req, struct fuse_file_info *fi) {
 
 void reopen(fd_t *fdi) {
 	logf("reopening the audio device\n");
-	int fd = open(params.target_name, fdi->open_flags);
+	int fd = open_target(fdi->target, fdi->open_flags);
 	fdi->fd = fd;
 	ioctl(fd, SNDCTL_DSP_SPEED, &fdi->rate);
 	ioctl(fd, SNDCTL_DSP_CHANNELS, &fdi->channels);
@@ -249,7 +253,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 	} else { \
 		fuse_reply_ioctl(req, 0, NULL, 0); \
 	}
-#define IOCTL(c, a) IOCTL_(c, &a, sizeof(a))
+#define IOCTL(c, a) IOCTL_(c, a, sizeof(*a))
 
 #define CASE(ioc) case (uint32_t)(ioc)
 
@@ -269,7 +273,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
 				logf("rate: want %d\n", a);
-				IOCTL(SNDCTL_DSP_SPEED, a);
+				IOCTL(SNDCTL_DSP_SPEED, &a);
 				logf("rate: got %d\n", a);
 				fdi->rate = a;
 			}
@@ -278,7 +282,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				IOCTL(SNDCTL_DSP_STEREO, a);
+				IOCTL(SNDCTL_DSP_STEREO, &a);
 				fdi->channels = a ? 2 : 1;
 			}
 			break;
@@ -287,7 +291,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				// Somewhy it's WR, so we retrieve an int just to stay on the safe side
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				IOCTL(SNDCTL_DSP_GETBLKSIZE, a);
+				IOCTL(SNDCTL_DSP_GETBLKSIZE, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_SETFMT):	// 5
@@ -295,7 +299,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
 				logf("fmt: want %x\n", a);
-				IOCTL(SNDCTL_DSP_SETFMT, a);
+				IOCTL(SNDCTL_DSP_SETFMT, &a);
 				logf("fmt: got %x\n", a);
 				fdi->fmt = a;
 			}
@@ -305,7 +309,7 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
 				logf("chans: want %d\n", a);
-				IOCTL(SNDCTL_DSP_CHANNELS, a);
+				IOCTL(SNDCTL_DSP_CHANNELS, &a);
 				logf("chans: got %d\n", a);
 				fdi->channels = a;
 			}
@@ -314,14 +318,14 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(0, sizeof(int));
 				int a;
-				IOCTL(OSS_GETVERSION, a);
+				IOCTL(OSS_GETVERSION, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_SETFRAGMENT):
 			{
 				WANT(sizeof(int), sizeof(int));
 				int a = *(int *)in_buf;
-				IOCTL(SNDCTL_DSP_SETFRAGMENT, a);
+				IOCTL(SNDCTL_DSP_SETFRAGMENT, &a);
 				fdi->fragment = a;
 			}
 			break;
@@ -329,69 +333,97 @@ static void my_ioctl(fuse_req_t req, int cmd, void *arg, struct fuse_file_info *
 			{
 				WANT(0, sizeof(int));
 				int a;
-				IOCTL(SNDCTL_DSP_GETFMTS, a);
+				IOCTL(SNDCTL_DSP_GETFMTS, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETOSPACE):	// 12
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
-				IOCTL(SNDCTL_DSP_GETOSPACE, a);
+				IOCTL(SNDCTL_DSP_GETOSPACE, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETISPACE):	// 13
 			{
 				WANT(0, sizeof(audio_buf_info));
 				audio_buf_info a;
-				IOCTL(SNDCTL_DSP_GETISPACE, a);
+				IOCTL(SNDCTL_DSP_GETISPACE, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETCAPS):
 			{
 				WANT(0, sizeof(int));
 				int a;
-				IOCTL(SNDCTL_DSP_GETCAPS, a);
+				IOCTL(SNDCTL_DSP_GETCAPS, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETIPTR):	// 17
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
-				IOCTL(SNDCTL_DSP_GETIPTR, a);
+				IOCTL(SNDCTL_DSP_GETIPTR, &a);
 			}
 			break;
 		CASE(SNDCTL_DSP_GETOPTR):	// 18
 			{
 				WANT(0, sizeof(count_info));
 				count_info a;
-				IOCTL(SNDCTL_DSP_GETOPTR, a);
+				IOCTL(SNDCTL_DSP_GETOPTR, &a);
 			}
 			break;
 		CASE(SNDCTL_SYSINFO):
 			{
 				WANT(0, sizeof(oss_sysinfo));
 				oss_sysinfo a;
-				IOCTL(SNDCTL_SYSINFO, a);
+				IOCTL(SNDCTL_SYSINFO, &a);
 			}
 			break;
 		CASE(SNDCTL_AUDIOINFO):
 			{
 				// TODO replace device names to ours or mess with the filesystem so the original device files will get overlapped
 				WANT(sizeof(oss_audioinfo), sizeof(oss_audioinfo));
-				oss_audioinfo a;
+				oss_audioinfo *a = (oss_audioinfo *)in_buf;
 				IOCTL(SNDCTL_AUDIOINFO, a);
+			}
+			break;
+		CASE(SNDCTL_AUDIOINFO_EX):
+			{
+				WANT(sizeof(oss_audioinfo), sizeof(oss_audioinfo));
+				oss_audioinfo *a = (oss_audioinfo *)in_buf;
+				IOCTL(SNDCTL_AUDIOINFO_EX, a);
+			}
+			break;
+		CASE(SNDCTL_ENGINEINFO):
+			{
+				WANT(sizeof(oss_audioinfo), sizeof(oss_audioinfo));
+				oss_audioinfo *a = (oss_audioinfo *)in_buf;
+				IOCTL(SNDCTL_ENGINEINFO, a);
 			}
 			break;
 		CASE(SNDCTL_SETLABEL):
 			{
 				WANT(sizeof(oss_label_t), 0);
 				oss_label_t *a = (oss_label_t *)in_buf;
-				IOCTL(SNDCTL_SETLABEL, a);
+				IOCTL(SNDCTL_SETLABEL, &a);
 				memcpy(&fdi->label, a, sizeof(oss_label_t));
 			}
 			break;
+		CASE(SNDCTL_MIX_NRMIX):
+			{
+				WANT(0, sizeof(int));
+				int a;
+				IOCTL(SNDCTL_MIX_NRMIX, &a);
+			}
+			break;
+		CASE(SNDCTL_MIXERINFO):
+			{
+				WANT(sizeof(oss_mixerinfo), sizeof(oss_mixerinfo));
+				oss_mixerinfo *a = (oss_mixerinfo *)in_buf;
+				IOCTL(SNDCTL_MIXERINFO, a);
+			}
+			break;
 		default:
-			printf("ioctl failed %x\n", cmd);
+			errf("ioctl failed %x\n", cmd);
 			fuse_reply_err(req, ENOSYS);
 			break;
 	}
@@ -417,7 +449,7 @@ static int process_arg(void *data, const char *arg, int key, struct fuse_args *o
 	switch (key) {
 		case 0:
 			param->is_help = 1;
-			fprintf(stderr, "%s", usage);
+			errf("%s", usage);
 			return fuse_opt_add_arg(outargs, "-ho");
 		default:
 			return 1;
@@ -451,32 +483,7 @@ void cont(int sig) {
 	pthread_rwlock_unlock(&fdarr_lock);
 }
 
-int main(int argc, char **argv) {
-	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-	char dev_name[128] = "DEVNAME=";
-	const char *dev_info_argv[] = { dev_name };
-	struct cuse_info ci;
-
-	if (fuse_opt_parse(&args, &params, opts, process_arg)) {
-		printf("failed to parse option\n");
-		return 1;
-	}
-
-	if (!params.is_help) {
-		strncat(dev_name, params.dev_name, sizeof(dev_name) - 9);
-	}
-
-
-	memset(&ci, 0, sizeof(ci));
-	ci.dev_major = params.major;
-	ci.dev_minor = params.minor;
-	ci.dev_info_argc = 1;
-	ci.dev_info_argv = dev_info_argv;
-	ci.flags = CUSE_UNRESTRICTED_IOCTL;
-
-	FREEARRAY_CREATE(&fdarr);
-	pthread_rwlock_init(&fdarr_lock, NULL);
-
+void setup_signals() {
 	struct sigaction sta, cta;
 	sta.sa_handler = stop;
 	sta.sa_flags = 0;
@@ -486,6 +493,71 @@ int main(int argc, char **argv) {
 	cta.sa_flags = 0;
 	sigemptyset(&cta.sa_mask);
 	sigaction(SIGUSR2, &cta, NULL);
+}
 
-	return cuse_lowlevel_main(args.argc, args.argv, &ci, &cuseops, NULL);
+struct cuse_info *mkci(char *devname) {
+	struct cuse_info *ci = calloc(sizeof(struct cuse_info), 1);
+	char *dev_name = malloc(128);
+	char **dev_info_argv = malloc(sizeof(char **));
+	*dev_info_argv = dev_name;
+
+	ci->dev_info_argc = 1;
+	ci->dev_info_argv = (const char **)dev_info_argv;
+	ci->flags = CUSE_UNRESTRICTED_IOCTL;
+
+	snprintf(dev_name, 128, "DEVNAME=%s", devname);
+
+	return ci;
+}
+
+struct fuse_session *setup_cuse_session(char *devname, uintptr_t devid, int argc, char **argv) {
+	struct cuse_info *ci = mkci(devname);
+	struct fuse_session *se = cuse_lowlevel_setup(argc, argv, ci, &cuseops, NULL, (void *)devid);
+
+	if (!se) {
+		errf("cuse_lowlevel_setup failed\n");
+		return NULL;
+	}
+
+	int fd = fuse_chan_fd(fuse_session_next_chan(se, NULL));
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	return se;
+}
+
+void *cuse_thread(void *arg) {
+	struct fuse_session *se = arg;
+	intptr_t rv = fuse_session_loop_mt(se);
+	cuse_lowlevel_teardown(se);
+	// TODO free ci
+	
+	return (void *)rv;
+}
+
+int cuse_start(int argc, char **argv) {
+	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	pthread_t mixer_thr;
+
+	if (fuse_opt_parse(&args, &params, opts, process_arg)) {
+		errf("failed to parse option\n");
+		return 1;
+	}
+	
+	if (params.is_help)
+		return 1;
+
+	struct fuse_session *dsp_se = setup_cuse_session("dsp", 0, argc, argv);
+	struct fuse_session *mixer_se = setup_cuse_session("mixer", 1, argc, argv);
+
+	pthread_create(&mixer_thr, NULL, cuse_thread, mixer_se);
+
+	return (intptr_t)cuse_thread(dsp_se);
+}
+
+int main(int argc, char **argv) {
+	FREEARRAY_CREATE(&fdarr);
+	pthread_rwlock_init(&fdarr_lock, NULL);
+	setup_signals();
+
+	return cuse_start(argc, argv);
 }
