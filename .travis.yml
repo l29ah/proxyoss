@@ -5,6 +5,6 @@ compiler:
 script: make
 before_install:
  - sudo wget http://www.4front-tech.com/release/oss-linux-4.2-2007_i386.deb
- - sudo dpkg -I oss-linux-4.2-2007_i386.deb
+ - sudo dpkg -i oss-linux-4.2-2007_i386.deb
  - sudo apt-get update -qq
  - sudo apt-get install -qq libfuse-dev
