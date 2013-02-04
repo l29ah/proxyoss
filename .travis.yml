@@ -4,5 +4,6 @@ compiler:
   - clang
 script: make
 before_install:
+ - sudo add-apt-repository ppa:holindho/opensound
  - sudo apt-get update -qq
  - sudo apt-get install -qq libfuse-dev oss4-base oss4-dev
