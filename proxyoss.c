@@ -498,7 +498,7 @@ void setup_signals() {
 struct cuse_info *mkci(char *devname) {
 	struct cuse_info *ci = calloc(sizeof(struct cuse_info), 1);
 	char *dev_name = malloc(128);
-	char **dev_info_argv = malloc(sizeof(char **));
+	char **dev_info_argv = malloc(sizeof(char *));
 	*dev_info_argv = dev_name;
 
 	ci->dev_info_argc = 1;
