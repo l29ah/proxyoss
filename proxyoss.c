@@ -1,5 +1,6 @@
 #define FUSE_USE_VERSION 29
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +85,8 @@ int open_target(uint_fast8_t target, int flags) {
 		case 1:
 			name = "/dev/mixer0";
 			break;
+		default:
+			assert(0);
 	}
 	return open(name, flags);
 }
